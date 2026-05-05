@@ -1,0 +1,41 @@
+seeds: [0]
+device: auto
+methods:
+  - rope
+  - jordan_raw_tau
+
+position:
+  theta: 10000.0
+  gamma_min: 0.0001
+  init_gamma: 0.0001
+  eta_max: 0.1
+  init_eta: 0.0
+  train_context: 64
+  bounded_tau: true
+  max_exponent: 30.0
+
+kernel_lm:
+  benchmark: mixed_raw
+  train_steps: 4
+  log_every: 1
+  eval_every: 4
+  batch_size: 2
+  eval_batches: 2
+  eval_batch_size: 1
+  seq_len_train: 64
+  eval_lengths: [64, 128]
+  data_seed: 7107
+  eval_seed: 9109
+  label_mode: threshold
+  logit_scale: 3.0
+  target_freq_index: 2
+  second_freq_index: 4
+  gamma: 0.0001
+  model:
+    d_model: 64
+    n_heads: 4
+    n_layers: 2
+    mlp_ratio: 2
+    dropout: 0.0
+  lr: 0.001
+  weight_decay: 0.0

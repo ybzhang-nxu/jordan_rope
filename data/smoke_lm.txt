@@ -1,0 +1,11 @@
+Complex Jordan-RoPE smoke text.
+
+This tiny local corpus exists only to exercise the byte-level language-model
+training loop without downloading a dataset. The real research configuration
+uses WikiText or another long-context corpus.
+
+The experiment checks that positional encodings, causal masking, optimization,
+and extrapolation evaluation all execute end to end.
+
+Complex Jordan-RoPE couples a rotating phase with a nilpotent polynomial mode.
+The smoke run is intentionally too small to support scientific conclusions.

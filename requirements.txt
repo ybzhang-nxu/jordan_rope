@@ -1,0 +1,6 @@
+torch>=2.2
+pyyaml>=6.0
+matplotlib>=3.8
+tqdm>=4.66
+datasets>=2.18
+pytest>=8.0

@@ -1,0 +1,82 @@
+seeds: [0, 1, 2]
+device: cpu
+methods:
+  - nope
+  - rope
+  - alibi
+  - rope_alibi
+  - damped_rope
+  - real_jordan
+  - direct_sum
+  - jordan_rope
+ablation_methods:
+  - jordan_no_gamma
+  - jordan_raw_tau
+toy_extra_methods:
+  - jordan_m3
+
+position:
+  theta: 10000.0
+  gamma_min: 0.0001
+  init_gamma: 0.0001
+  eta_max: 0.1
+  init_eta: 0.0
+  train_context: 128
+  bounded_tau: true
+  max_exponent: 30.0
+
+toy:
+  train_context: 128
+  eval_contexts: [128, 256, 512]
+  num_freqs: 8
+  head_dim: 32
+  target_freq_index: 2
+  ridge: 0.0001
+  train_points: 128
+  gamma: 0.0001
+
+retrieval:
+  train_steps: 20
+  log_every: 5
+  eval_every: 20
+  batch_size: 4
+  eval_batches: 4
+  eval_batch_size: 4
+  seq_len_train: 128
+  eval_lengths: [128, 256]
+  distance_points: [16, 32, 64, 128]
+  num_pairs: 8
+  num_keys: 32
+  num_values: 32
+  lr: 0.001
+  weight_decay: 0.0
+  model:
+    d_model: 96
+    n_heads: 4
+    n_layers: 2
+    mlp_ratio: 2
+    dropout: 0.0
+
+lm:
+  train_steps: 20
+  log_every: 5
+  eval_every: 20
+  batch_size: 2
+  eval_batches: 4
+  eval_batch_size: 1
+  seq_len_train: 128
+  eval_lengths: [128, 256]
+  lr: 0.001
+  weight_decay: 0.0
+  dataset:
+    name: wikitext
+    subset: wikitext-103-raw-v1
+    train_split: train
+    eval_split: validation
+    text_file: data/smoke_lm.txt
+  model:
+    d_model: 96
+    n_heads: 4
+    n_layers: 2
+    mlp_ratio: 2
+    dropout: 0.0

@@ -1,0 +1,17 @@
+# Python / local environments
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+*.bundle
+*.tar.gz
+
+# OS/editor noise
+.DS_Store
+*~
+
+# Paper and generated experiment outputs are not part of the minimal code repo.
+paper/
+runs/
+项目计划.md

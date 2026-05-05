@@ -1,0 +1,82 @@
+seeds: [0, 1, 2]
+device: auto
+methods:
+  - nope
+  - rope
+  - alibi
+  - rope_alibi
+  - damped_rope
+  - real_jordan
+  - direct_sum
+  - jordan_rope
+ablation_methods:
+  - jordan_no_gamma
+  - jordan_raw_tau
+toy_extra_methods:
+  - jordan_m3
+
+position:
+  theta: 10000.0
+  gamma_min: 0.0001
+  init_gamma: 0.0001
+  eta_max: 0.1
+  init_eta: 0.0
+  train_context: 1024
+  bounded_tau: true
+  max_exponent: 30.0
+
+toy:
+  train_context: 1024
+  eval_contexts: [1024, 2048, 4096, 8192]
+  num_freqs: 16
+  head_dim: 64
+  target_freq_index: 3
+  ridge: 0.0001
+  train_points: 1024
+  gamma: 0.0001
+
+retrieval:
+  train_steps: 2000
+  log_every: 100
+  eval_every: 500
+  batch_size: 16
+  eval_batches: 32
+  eval_batch_size: 8
+  seq_len_train: 1024
+  eval_lengths: [1024, 2048, 4096, 8192]
+  distance_points: [64, 128, 256, 512, 1024, 2048, 4096, 8192]
+  num_pairs: 32
+  num_keys: 128
+  num_values: 128
+  lr: 0.0003
+  weight_decay: 0.01
+  model:
+    d_model: 256
+    n_heads: 8
+    n_layers: 4
+    mlp_ratio: 4
+    dropout: 0.0
+
+lm:
+  train_steps: 5000
+  log_every: 100
+  eval_every: 1000
+  batch_size: 4
+  eval_batches: 32
+  eval_batch_size: 1
+  seq_len_train: 1024
+  eval_lengths: [1024, 2048, 4096, 8192]
+  lr: 0.0003
+  weight_decay: 0.1
+  dataset:
+    name: wikitext
+    subset: wikitext-103-raw-v1
+    train_split: train
+    eval_split: validation
+    text_file: null
+  model:
+    d_model: 512
+    n_heads: 8
+    n_layers: 8
+    mlp_ratio: 4
+    dropout: 0.0
