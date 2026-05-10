@@ -143,6 +143,9 @@ class JordanRoPE(nn.Module):
         force_zero_eta: bool = False,
         force_zero_omega: bool = False,
         order: int = 2,
+        jet_coefficients: tuple[float, ...] | None = None,
+        jet_base_coefficient: float | None = None,
+        jet_coefficient_max: float = 1.0,
     ) -> None:
         super().__init__()
         if order < 2:
@@ -160,6 +163,7 @@ class JordanRoPE(nn.Module):
         self.force_zero_gamma = force_zero_gamma
         self.force_zero_eta = force_zero_eta
         self.force_zero_omega = force_zero_omega
+        self.jet_coefficient_max = float(jet_coefficient_max)
 
         inv_freq = self.config.theta ** (
             -2.0 * torch.arange(self.num_blocks, dtype=torch.float32) / head_dim
@@ -186,6 +190,23 @@ class JordanRoPE(nn.Module):
         else:
             self.register_buffer("fixed_eta", eta_target * self.config.eta_max, persistent=False)
             self.raw_eta = None
+        if jet_coefficients is not None:
+            if len(jet_coefficients) != order - 1:
+                raise ValueError(
+                    f"Expected {order - 1} jet coefficients for order={order}, got {len(jet_coefficients)}."
+                )
+            coeff_target = torch.tensor(jet_coefficients, dtype=torch.float32)[:, None, None]
+            coeff_target = coeff_target.expand(order - 1, num_heads, self.num_blocks).clone()
+            scaled = coeff_target / max(self.jet_coefficient_max, 1e-8)
+            self.raw_jet_coefficients = nn.Parameter(_atanh_clamped(scaled))
+        else:
+            self.raw_jet_coefficients = None
+        if jet_base_coefficient is not None:
+            base_target = torch.full((num_heads, self.num_blocks), float(jet_base_coefficient), dtype=torch.float32)
+            base_scaled = base_target / max(self.jet_coefficient_max, 1e-8)
+            self.raw_jet_base = nn.Parameter(_atanh_clamped(base_scaled))
+        else:
+            self.raw_jet_base = None
 
     def gamma(self) -> torch.Tensor:
         if self.force_zero_gamma:
@@ -204,6 +225,38 @@ class JordanRoPE(nn.Module):
         if self.raw_eta is None:
             return self.fixed_eta
         return self.config.eta_max * torch.tanh(self.raw_eta)
+
+    def jet_coefficients(self) -> torch.Tensor | None:
+        if self.raw_jet_coefficients is None:
+            return None
+        return self.jet_coefficient_max * torch.tanh(self.raw_jet_coefficients)
+
+    def jet_base_coefficient(self) -> torch.Tensor | None:
+        if self.raw_jet_base is None:
+            return None
+        return self.jet_coefficient_max * torch.tanh(self.raw_jet_base)
+
+    def jet_spectrum(self) -> torch.Tensor | None:
+        coefficients = self.jet_coefficients()
+        base = self.jet_base_coefficient()
+        if coefficients is None and base is None:
+            return None
+        if coefficients is None:
+            coefficients = torch.zeros(
+                self.order - 1,
+                self.num_heads,
+                self.num_blocks,
+                device=self.omega.device,
+                dtype=self.omega.dtype,
+            )
+        if base is None:
+            base = torch.ones(
+                self.num_heads,
+                self.num_blocks,
+                device=coefficients.device,
+                dtype=coefficients.dtype,
+            )
+        return torch.cat((base[None, :, :], coefficients), dim=0)
 
     def effective_shear_time(self, t: torch.Tensor) -> torch.Tensor:
         if not self.config.bounded_tau:
@@ -231,11 +284,38 @@ class JordanRoPE(nn.Module):
         )
         return shear.to(dtype=dtype), (decay_exp, inv_decay_exp)
 
+    def _coefficients_for_time(self, t: torch.Tensor, dtype: torch.dtype) -> tuple[list[float | torch.Tensor], list[float | torch.Tensor], tuple[torch.Tensor, torch.Tensor]]:
+        shear, exponents = self._parameters_for_time(t, dtype)
+        jet_coefficients = self.jet_coefficients()
+        jet_base = self.jet_base_coefficient()
+        if jet_base is None:
+            coeffs: list[float | torch.Tensor] = [1.0]
+        else:
+            coeffs = [jet_base.to(device=t.device, dtype=dtype)[None, :, None, :, None]]
+        if jet_coefficients is None:
+            for power in range(1, self.order):
+                coeffs.append(shear.pow(power) / math.factorial(power))
+        else:
+            t_eff = self.effective_shear_time(t.to(torch.float32)).to(dtype=dtype)
+            base = t_eff[None, None, :, None, None]
+            gates = jet_coefficients.to(device=t.device, dtype=dtype)
+            for power in range(1, self.order):
+                gate = gates[power - 1][None, :, None, :, None]
+                coeffs.append(gate * base.pow(power) / math.factorial(power))
+
+        inv_coeffs: list[float | torch.Tensor] = [1.0 / coeffs[0]]
+        for power in range(1, self.order):
+            value: float | torch.Tensor = 0.0
+            for prev in range(1, power + 1):
+                value = value + coeffs[prev] * inv_coeffs[power - prev]
+            inv_coeffs.append(-value / coeffs[0])
+        return coeffs, inv_coeffs, exponents
+
     def _apply_a(self, x: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
         bsz, heads, length, dim = x.shape
         blocks = x.reshape(bsz, heads, length, self.num_blocks, self.order, 2)
         cos, sin = self._angles(t, x.dtype)
-        shear, (decay_exp, _) = self._parameters_for_time(t, x.dtype)
+        coeffs, _, (decay_exp, _) = self._coefficients_for_time(t, x.dtype)
         rotated = [_rotate_pairs(blocks[..., idx, :], cos, sin) for idx in range(self.order)]
         decay = decay_exp.exp().to(dtype=x.dtype)
         outputs = []
@@ -243,11 +323,7 @@ class JordanRoPE(nn.Module):
             y = torch.zeros_like(rotated[row])
             for col in range(row, self.order):
                 power = col - row
-                if power == 0:
-                    coef = 1.0
-                else:
-                    coef = shear.pow(power) / math.factorial(power)
-                y = y + coef * rotated[col]
+                y = y + coeffs[power] * rotated[col]
             outputs.append(decay * y)
         return torch.cat(outputs, dim=-1).reshape(bsz, heads, length, dim)
 
@@ -255,7 +331,7 @@ class JordanRoPE(nn.Module):
         bsz, heads, length, dim = x.shape
         blocks = x.reshape(bsz, heads, length, self.num_blocks, self.order, 2)
         cos, sin = self._angles(t, x.dtype)
-        shear, (_, inv_decay_exp) = self._parameters_for_time(t, x.dtype)
+        _, inv_coeffs, (_, inv_decay_exp) = self._coefficients_for_time(t, x.dtype)
         rotated = [_rotate_pairs(blocks[..., idx, :], cos, sin) for idx in range(self.order)]
         inv_decay = inv_decay_exp.exp().to(dtype=x.dtype)
         outputs = []
@@ -263,11 +339,7 @@ class JordanRoPE(nn.Module):
             y = torch.zeros_like(rotated[row])
             for col in range(0, row + 1):
                 power = row - col
-                if power == 0:
-                    coef = 1.0
-                else:
-                    coef = ((-1.0) ** power) * shear.pow(power) / math.factorial(power)
-                y = y + coef * rotated[col]
+                y = y + inv_coeffs[power] * rotated[col]
             outputs.append(inv_decay * y)
         return torch.cat(outputs, dim=-1).reshape(bsz, heads, length, dim)
 
@@ -325,6 +397,19 @@ def causal_delta_features(
     bounded_tau: bool = True,
 ) -> torch.Tensor:
     """Basis features used by the synthetic diagnostic tasks."""
+    def _order_from_suffix(prefix: str, default: int) -> int:
+        if method.startswith(prefix):
+            tail = method.removeprefix(prefix)
+            digits = ""
+            for char in tail:
+                if char.isdigit():
+                    digits += char
+                else:
+                    break
+            if digits:
+                return int(digits)
+        return default
+
     if method == "jordan_no_gamma":
         method = "jordan_rope"
         gamma = 0.0
@@ -355,6 +440,10 @@ def causal_delta_features(
         return ones
     if method == "rope":
         return torch.cat((ones, cos, sin), dim=1)
+    if method.startswith("rope_matched_m"):
+        order = max(1, _order_from_suffix("rope_matched_m", 2))
+        matched = max(1, num_freqs // order)
+        return torch.cat((ones, cos[:, :matched], sin[:, :matched]), dim=1)
     if method == "alibi":
         return torch.cat((ones, d_norm[:, None]), dim=1)
     if method == "rope_alibi":
@@ -365,22 +454,33 @@ def causal_delta_features(
         return torch.cat((ones, decay, tau_norm[:, None] * decay), dim=1)
     if method == "direct_sum":
         return torch.cat((ones, cos, sin, d_norm[:, None], decay, tau_norm[:, None] * decay), dim=1)
+    if method.startswith("direct_sum_poly_m"):
+        order = max(2, _order_from_suffix("direct_sum_poly_m", 4))
+        poly = [tau_norm[:, None].pow(power) for power in range(1, order)]
+        return torch.cat((ones, cos, sin, *poly), dim=1)
     if method == "jordan_rope":
         return torch.cat((ones, decay * cos, decay * sin, tau_norm[:, None] * decay * cos, tau_norm[:, None] * decay * sin), dim=1)
     if method == "jordan_m3":
-        second = 0.5 * tau_norm[:, None].pow(2)
-        return torch.cat(
-            (
-                ones,
-                decay * cos,
-                decay * sin,
-                tau_norm[:, None] * decay * cos,
-                tau_norm[:, None] * decay * sin,
-                second * decay * cos,
-                second * decay * sin,
-            ),
-            dim=1,
-        )
+        method = "jordan_m3_or_m4"
+        order = 3
+    elif method == "jordan_m4":
+        method = "jordan_m3_or_m4"
+        order = 4
+    elif method.startswith("jordan_scaled_m"):
+        order = max(2, _order_from_suffix("jordan_scaled_m", 3))
+        c_value = _parse_exact_scaled_c(method)
+        scaled_decay = torch.exp(-c_value * d_norm)[:, None]
+        features = [ones]
+        for power in range(order):
+            coef = d_norm[:, None].pow(power) / math.factorial(power)
+            features.extend((coef * scaled_decay * cos, coef * scaled_decay * sin))
+        return torch.cat(features, dim=1)
+    if method == "jordan_m3_or_m4":
+        features = [ones]
+        for power in range(order):
+            coef = tau_norm[:, None].pow(power) / math.factorial(power)
+            features.extend((coef * decay * cos, coef * decay * sin))
+        return torch.cat(features, dim=1)
     raise ValueError(f"Unknown method: {method}")
 
 

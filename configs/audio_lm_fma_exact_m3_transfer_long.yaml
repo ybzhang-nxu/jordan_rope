@@ -1,0 +1,47 @@
+seeds: [0, 1, 2, 3, 4]
+device: cuda
+methods:
+  - rope
+  - damped_rope
+  - direct_sum
+  - jordan_rope
+  - jordan_exact_m3_c010_eta100_eta1
+  - jordan_exact_m3_c010_eta200_eta1
+  - jordan_exact_m3_c050_eta100_eta1
+
+position:
+  theta: 10000.0
+  gamma_min: 0.0001
+  init_gamma: 0.0001
+  eta_max: 0.1
+  init_eta: 0.0
+  train_context: 256
+  bounded_tau: true
+  max_exponent: 30.0
+
+lm:
+  train_steps: 800
+  log_every: 100
+  eval_every: 200
+  batch_size: 32
+  eval_batches: 32
+  eval_batch_size: 4
+  train_sample_seed: 1701
+  eval_sample_seed: 20270506
+  seq_len_train: 256
+  eval_lengths: [256, 512, 1024, 2048]
+  lr: 0.0006
+  weight_decay: 0.05
+  dataset:
+    name: local
+    subset: fma_mel
+    train_split: train
+    eval_split: eval
+    train_text_file: data/processed/audio_lm_smoke/fma_mel/train.bin
+    eval_text_file: data/processed/audio_lm_smoke/fma_mel/eval.bin
+  model:
+    d_model: 192
+    n_heads: 4
+    n_layers: 3
+    mlp_ratio: 2
+    dropout: 0.0

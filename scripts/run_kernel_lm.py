@@ -74,6 +74,13 @@ def kernel_values(length: int, cfg: dict, device):
     elif benchmark == "rhythm_envelope":
         carrier = 0.65 * torch.cos(omega * d) + 0.35 * torch.sin(omega2 * d)
         k = (0.25 + 0.85 * x) * carrier
+    elif benchmark.startswith("high_jet_r"):
+        order = int(benchmark.removeprefix("high_jet_r"))
+        k = x.pow(order) * torch.cos(omega * d)
+    elif benchmark.startswith("scaled_high_jet_r"):
+        order = int(benchmark.removeprefix("scaled_high_jet_r"))
+        c_value = float(klm.get("scaled_c", 0.1))
+        k = x.pow(order) * torch.exp(-c_value * x) * torch.cos(omega * d)
     else:
         raise ValueError(f"Unknown kernel_lm benchmark: {benchmark}")
 
@@ -87,9 +94,18 @@ def kernel_values(length: int, cfg: dict, device):
     elif benchmark == "damped_mixed":
         train_decay = torch.exp(-gamma * train_d)
         train_k = train_decay * (torch.cos(omega * train_d) + 0.75 * train_x * torch.sin(omega * train_d))
-    else:
+    elif benchmark == "rhythm_envelope":
         train_carrier = 0.65 * torch.cos(omega * train_d) + 0.35 * torch.sin(omega2 * train_d)
         train_k = (0.25 + 0.85 * train_x) * train_carrier
+    elif benchmark.startswith("high_jet_r"):
+        order = int(benchmark.removeprefix("high_jet_r"))
+        train_k = train_x.pow(order) * torch.cos(omega * train_d)
+    elif benchmark.startswith("scaled_high_jet_r"):
+        order = int(benchmark.removeprefix("scaled_high_jet_r"))
+        c_value = float(klm.get("scaled_c", 0.1))
+        train_k = train_x.pow(order) * torch.exp(-c_value * train_x) * torch.cos(omega * train_d)
+    else:
+        raise ValueError(f"Unknown kernel_lm benchmark: {benchmark}")
     norm = torch.linalg.vector_norm(train_k).clamp_min(1e-6)
     return k / norm
 
@@ -169,11 +185,18 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Train query-style synthetic LM with Jordan-friendly kernels.")
     parser.add_argument("--config", default="configs/kernel_lm.yaml")
     parser.add_argument("--out-dir", default="runs/kernel_lm")
+    parser.add_argument("--benchmark", default=None, help="Override cfg['kernel_lm']['benchmark'].")
     parser.add_argument("--methods", nargs="*", default=None)
+    parser.add_argument("--seeds", nargs="*", type=int, default=None)
+    parser.add_argument("--save-checkpoints", action="store_true")
     args = parser.parse_args()
 
     torch.set_float32_matmul_precision("high")
     cfg = load_config(args.config)
+    if args.benchmark is not None:
+        cfg["kernel_lm"]["benchmark"] = args.benchmark
+    if args.seeds is not None:
+        cfg["seeds"] = args.seeds
     out_dir = ensure_dir(args.out_dir)
     save_config(cfg, out_dir / "config.yaml")
     device = choose_device(cfg.get("device", "auto"))
@@ -229,6 +252,13 @@ def main() -> None:
                     eval_rows = evaluate(model, cfg, device, method, seed, step)
                     rows.extend(eval_rows)
                     write_csv(out_dir / "kernel_lm_eval.csv", rows)
+
+            if args.save_checkpoints:
+                ckpt_dir = ensure_dir(out_dir / "checkpoints")
+                torch.save(
+                    {"model": model.state_dict(), "config": build_config(cfg, method).__dict__},
+                    ckpt_dir / f"{method}_seed{seed}.pt",
+                )
 
     write_csv(out_dir / "kernel_lm_eval.csv", rows)
     print(f"Wrote {out_dir / 'kernel_lm_eval.csv'}")

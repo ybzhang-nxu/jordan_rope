@@ -18,6 +18,11 @@ BENCHMARKS = {
     "damped_wave": "A damped oscillatory response with a polynomial wave term.",
     "rhythm_envelope": "Two rhythmic components with distance-dependent envelope.",
     "motif_spacing": "A repeated motif-spacing signal with distance modulation.",
+    "high_jet_r1": "First frequency-jet target (d/L) cos(omega d).",
+    "high_jet_r2": "Second frequency-jet target (d/L)^2 cos(omega d).",
+    "high_jet_r3": "Third frequency-jet target (d/L)^3 cos(omega d).",
+    "scaled_high_jet_r2": "Scaled second frequency-jet target (d/L)^2 exp(-c d/L) cos(omega d).",
+    "scaled_high_jet_r3": "Scaled third frequency-jet target (d/L)^3 exp(-c d/L) cos(omega d).",
 }
 
 
@@ -65,6 +70,15 @@ def target_values(name: str, deltas, cfg):
         # A motif/repeat proxy: periodic correlation plus distance-dependent confidence.
         motif = 0.7 * torch.cos(omega2 * d) - 0.3 * torch.sin(omega2 * d)
         return (x / (1.0 + 0.25 * x)) * motif
+
+    if name.startswith("high_jet_r"):
+        order = int(name.removeprefix("high_jet_r"))
+        return x.pow(order) * torch.cos(omega * d)
+
+    if name.startswith("scaled_high_jet_r"):
+        order = int(name.removeprefix("scaled_high_jet_r"))
+        c_value = float(bench.get("scaled_c", 0.1))
+        return x.pow(order) * torch.exp(-c_value * x) * torch.cos(omega * d)
 
     raise ValueError(f"Unknown benchmark: {name}")
 
@@ -117,6 +131,9 @@ def plot_predictions(out_dir: Path, benchmark: str, context: int, predictions: d
         "jordan_rope",
         "jordan_raw_tau",
         "jordan_m3",
+        "jordan_m4",
+        "jordan_scaled_m3_c010",
+        "jordan_scaled_m4_c010",
     ]
     plt.figure(figsize=(10, 5))
     for name in order:

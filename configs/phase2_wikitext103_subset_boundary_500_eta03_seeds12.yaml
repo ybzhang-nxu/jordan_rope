@@ -1,0 +1,40 @@
+seeds: [1, 2]
+device: cuda
+methods:
+  - jordan_rope
+
+position:
+  theta: 10000.0
+  gamma_min: 0.0001
+  init_gamma: 0.0001
+  eta_max: 0.03
+  init_eta: 0.0
+  train_context: 512
+  bounded_tau: true
+  max_exponent: 30.0
+
+lm:
+  train_steps: 500
+  log_every: 100
+  eval_every: 500
+  batch_size: 4
+  eval_batches: 4
+  eval_batch_size: 1
+  train_sample_seed: 5701
+  eval_sample_seed: 6701
+  seq_len_train: 512
+  eval_lengths: [512, 1024, 2048]
+  lr: 0.0005
+  weight_decay: 0.05
+  dataset:
+    name: wikitext
+    subset: wikitext-103-raw-v1
+    train_split: train[:1%]
+    eval_split: validation
+    text_file: null
+  model:
+    d_model: 128
+    n_heads: 4
+    n_layers: 3
+    mlp_ratio: 2
+    dropout: 0.0

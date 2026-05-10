@@ -19,6 +19,9 @@ def load_tokens(cfg: dict, split: str):
     from jordan_rope.data import load_hf_text_dataset, load_text_as_bytes
 
     data_cfg = cfg["lm"]["dataset"]
+    split_text_file = data_cfg.get(f"{split}_text_file")
+    if split_text_file:
+        return load_text_as_bytes(split_text_file)
     if data_cfg.get("text_file"):
         return load_text_as_bytes(data_cfg["text_file"])
     split_name = data_cfg["train_split"] if split == "train" else data_cfg["eval_split"]
@@ -131,25 +134,50 @@ def position_stats(model) -> dict[str, float | str]:
 
     gammas = []
     etas = []
+    jet_spectra = []
     for module in model.modules():
         if isinstance(module, JordanRoPE):
             gammas.append(module.gamma().detach().float().cpu().reshape(-1))
             etas.append(module.eta().detach().float().cpu().reshape(-1))
+            spectrum = module.jet_spectrum()
+            if spectrum is not None:
+                jet_spectra.append(spectrum.detach().float().cpu().abs().mean(dim=(1, 2)))
     if not gammas:
         return {
             "gamma_mean": "",
             "eta_mean": "",
             "eta_abs_mean": "",
             "eta_abs_max": "",
+            "jet0_abs_mean": "",
+            "jet1_abs_mean": "",
+            "jet2_abs_mean": "",
+            "jet3_abs_mean": "",
+            "jet4_abs_mean": "",
         }
     gamma = torch.cat(gammas)
     eta = torch.cat(etas)
-    return {
+    stats = {
         "gamma_mean": float(gamma.mean().item()),
         "eta_mean": float(eta.mean().item()),
         "eta_abs_mean": float(eta.abs().mean().item()),
         "eta_abs_max": float(eta.abs().max().item()),
+        "jet0_abs_mean": "",
+        "jet1_abs_mean": "",
+        "jet2_abs_mean": "",
+        "jet3_abs_mean": "",
+        "jet4_abs_mean": "",
     }
+    if jet_spectra:
+        max_order = max(item.numel() for item in jet_spectra)
+        stacked = []
+        for item in jet_spectra:
+            if item.numel() < max_order:
+                item = torch.cat((item, torch.full((max_order - item.numel(),), float("nan"))))
+            stacked.append(item)
+        coeff_mean = torch.stack(stacked).nanmean(dim=0)
+        for idx, value in enumerate(coeff_mean[:5]):
+            stats[f"jet{idx}_abs_mean"] = float(value.item())
+    return stats
 
 
 def main() -> None:
@@ -163,10 +191,13 @@ def main() -> None:
     parser.add_argument("--config", default="configs/full_research.yaml")
     parser.add_argument("--out-dir", default="runs/lm")
     parser.add_argument("--methods", nargs="*", default=None)
+    parser.add_argument("--seeds", nargs="*", type=int, default=None)
     parser.add_argument("--save-checkpoints", action="store_true")
     args = parser.parse_args()
 
     cfg = load_config(args.config)
+    if args.seeds is not None:
+        cfg["seeds"] = args.seeds
     out_dir = ensure_dir(args.out_dir)
     save_config(cfg, out_dir / "config.yaml")
     device = choose_device(cfg.get("device", "auto"))

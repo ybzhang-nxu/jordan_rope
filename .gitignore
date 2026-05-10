@@ -14,4 +14,10 @@ __pycache__/
 # Paper and generated experiment outputs are not part of the minimal code repo.
 paper/
 runs/
+dist/
+data/downloads/
+data/processed/
 项目计划.md
+*实验*.md
+*计划*.md
+*计划*.txt
